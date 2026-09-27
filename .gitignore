@@ -9,3 +9,8 @@ history.json
 run*.log
 # build artifacts
 app/_check.js
+app/preview*.png
+release_body.json
+qwen-asr-workbench-*.zip
+_ps_check*
+transcribe_drag.bat
