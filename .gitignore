@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+models/
+history.json
+*.log
+*.zip
+run*.log
+# build artifacts
+app/_check.js

@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="app-version" content="1.0.0">
+<meta name="app-repo" content="Jesse1024/qwen-asr-workbench">
+<title>Qwen3-ASR 语音转写工作台 · 南山怪客</title>
+<style>
+:root{
+  --bg:#f5f6f8; --card:#ffffff; --fg:#1c2330; --muted:#69758c;
+  --line:#e3e7ee; --accent:#2f6fed; --accent-weak:#e8effd; --ok:#1a9a6c; --err:#c23b3b;
+}
+[data-theme=dark]{
+  --bg:#12161f; --card:#1a202c; --fg:#e6eaf2; --muted:#8b96ab;
+  --line:#2a3242; --accent:#5b8ff7; --accent-weak:#1d2a44; --ok:#3cbf8e; --err:#e06c6c;
+}
+*{box-sizing:border-box; margin:0; padding:0}
+body{
+  background:var(--bg); color:var(--fg);
+  font-family:"Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;
+  font-size:14px; line-height:1.6;
+}
+.wrap{max-width:1080px; margin:0 auto; padding:28px 24px 60px}
+header{display:flex; align-items:center; gap:12px; margin-bottom:22px}
+h1{font-size:20px; font-weight:600}
+.status{margin-left:auto; display:flex; align-items:center; gap:7px; font-size:13px; color:var(--muted)}
+.dot{width:8px; height:8px; border-radius:50%; background:var(--err)}
+.dot.on{background:var(--ok)}
+
+.panel{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:18px}
+.panel h2{font-size:15px; font-weight:600; margin-bottom:12px}
+
+#drop{
+  border:2px dashed var(--line); border-radius:10px; padding:38px 20px;
+  text-align:center; color:var(--muted); cursor:pointer; transition:.15s;
+}
+#drop.over{border-color:var(--accent); background:var(--accent-weak); color:var(--accent)}
+#drop b{color:var(--fg); font-weight:600}
+#pick{display:none}
+
+.opts{display:flex; flex-wrap:wrap; gap:14px; margin-top:14px; align-items:center}
+.opts label{font-size:13px; color:var(--muted)}
+.opts input[type=text], .opts select{
+  background:var(--bg); border:1px solid var(--line); border-radius:8px;
+  color:var(--fg); padding:7px 10px; font-size:13px; outline:none;
+}
+.opts input[type=text]{flex:1; min-width:260px}
+.opts input[type=text]:focus, .opts select:focus{border-color:var(--accent)}
+.btn{
+  background:var(--accent); color:#fff; border:none; border-radius:8px;
+  padding:8px 18px; font-size:13px; cursor:pointer;
+}
+.btn:disabled{opacity:.45; cursor:not-allowed}
+.btn.ghost{background:transparent; color:var(--muted); border:1px solid var(--line)}
+.btn.ghost:hover{color:var(--fg); border-color:var(--muted)}
+
+#result{margin-top:14px; display:none}
+.rec-row{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+.btn.rec{background:var(--err); font-weight:600}
+.btn.rec.recording{animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.65}}
+#rec-time{font-variant-numeric:tabular-nums; font-size:15px; min-width:52px; color:var(--muted)}
+.meter{flex:1; max-width:240px; height:8px; background:var(--bg); border:1px solid var(--line); border-radius:4px; overflow:hidden}
+#meter-bar{height:100%; width:0%; background:var(--accent)}
+.rec-hint{font-size:12px; color:var(--muted)}
+#result .meta{font-size:12px; color:var(--muted); margin-bottom:8px}
+#text{
+  white-space:pre-wrap; background:var(--bg); border:1px solid var(--line);
+  border-radius:8px; padding:14px; min-height:80px; max-height:420px; overflow:auto;
+}
+.res-actions{margin-top:10px; display:flex; gap:8px}
+#err{color:var(--err); font-size:13px; margin-top:10px; display:none}
+
+.hist-head{display:flex; align-items:center}
+.hist-head .btn{margin-left:auto}
+.hist-item{
+  border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-top:10px;
+  cursor:pointer; transition:.12s;
+}
+.hist-item:hover{border-color:var(--accent)}
+.hist-item .hi-meta{font-size:12px; color:var(--muted); display:flex; gap:12px}
+.hist-item .hi-text{
+  margin-top:5px; font-size:13px; color:var(--fg);
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.empty{color:var(--muted); font-size:13px; text-align:center; padding:18px 0}
+.toast{
+  position:fixed; left:50%; bottom:36px; transform:translateX(-50%) translateY(20px);
+  background:var(--fg); color:var(--bg); padding:8px 18px; border-radius:8px;
+  font-size:13px; opacity:0; transition:.25s; pointer-events:none;
+}
+.toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+footer{
+  text-align:center; padding:16px 0 6px; font-size:12px; color:var(--muted);
+}
+footer a{color:var(--muted)}
+footer a:hover{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>语音转写工作台</h1>
+    <span class="status"><span class="dot" id="dot"></span><span id="st-text">连接中…</span></span>
+  </header>
+
+  <div class="panel">
+    <h2>录音 / 上传音频</h2>
+    <div class="rec-row">
+      <button class="btn rec" id="rec">● 开始录音</button>
+      <span id="rec-time">00:00</span>
+      <div class="meter"><div id="meter-bar"></div></div>
+      <span class="rec-hint">停止录音后自动开始转写</span>
+    </div>
+    <div id="drop">
+      把音频文件拖到这里，或 <b>点击选择</b><br>
+      <span style="font-size:12px">支持 mp3 / wav / m4a / flac / ogg / amr / 视频音轨，可多选</span>
+    </div>
+    <input type="file" id="pick" multiple accept="audio/*,video/*">
+    <div class="opts">
+      <label>热词提示</label>
+      <input type="text" id="hotwords" placeholder="人名、术语、股票代码等，空格或逗号分隔，可留空">
+      <label>语种</label>
+      <select id="lang">
+        <option value="auto">自动识别</option>
+        <option value="Chinese">中文</option>
+        <option value="English">英语</option>
+        <option value="Japanese">日语</option>
+        <option value="Korean">韩语</option>
+        <option value="Cantonese">粤语</option>
+      </select>
+      <button class="btn" id="go" disabled>开始转写</button>
+    </div>
+    <div id="err"></div>
+    <div id="result">
+      <div class="meta" id="res-meta"></div>
+      <div id="text"></div>
+      <div class="res-actions">
+        <button class="btn ghost" id="copy">复制全文</button>
+        <button class="btn ghost" id="dl">下载 .txt</button>
+        <button class="btn ghost" id="md">下载 .md</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="hist-head">
+      <h2>历史记录</h2>
+      <button class="btn ghost" id="clear">清空</button>
+    </div>
+    <div id="hist"><div class="empty">还没有记录</div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+<footer>南山怪客 · Qwen3-ASR 语音转写工作台 v<span id="ver">…</span> ·
+  <a href="#" id="check-upd">检查更新</a><span id="upd-msg"></span>
+</footer>
+<script>
+const $ = s => document.querySelector(s);
+const files = [];
+let current = null;
+const APP_VER = document.querySelector('meta[name=app-version]').content;
+const APP_REPO = document.querySelector('meta[name=app-repo]').content;
+$('#ver').textContent = APP_VER;
+
+/* ---------- 健康检查（自动重试：等服务启动/模型加载完） ---------- */
+let healthTried = 0;
+async function health(){
+  try{
+    const r = await fetch('/api/health'); const j = await r.json();
+    $('#dot').classList.add('on'); $('#st-text').textContent = j.model + ' · 就绪';
+    $('#go').disabled = false;
+  }catch(e){
+    $('#st-text').textContent = '模型加载中，请稍候…';
+    if(++healthTried < 60) setTimeout(health, 3000);
+    else $('#st-text').textContent = '服务未启动（请运行 app\\工作台.bat）';
+  }
+}
+
+/* ---------- 文件选择与拖拽 ---------- */
+$('#pick').addEventListener('change', e => { addFiles([...e.target.files]); e.target.value=''; });
+const drop = $('#drop');
+['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.add('over');
+}));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.remove('over');
+}));
+drop.addEventListener('drop', e => addFiles([...e.dataTransfer.files]));
+drop.addEventListener('click', () => $('#pick').click());
+
+function addFiles(fs){
+  files.push(...fs);
+  $('#drop').innerHTML = '已选 <b>' + files.length + '</b> 个文件，点击可重新选择或继续拖入';
+  $('#go').disabled = files.length === 0;
+}
+
+/* ---------- 转写 ---------- */
+async function uploadOne(f){
+  const fd = new FormData();
+  fd.append('file', f, f.name);
+  const hw = encodeURIComponent($('#hotwords').value.trim());
+  const r = await fetch('/api/transcribe?context=' + hw, {method:'POST', body:fd});
+  return r.json();
+}
+
+async function run(){
+  if(!files.length) return;
+  $('#err').style.display = 'none';
+  $('#go').disabled = true; $('#go').textContent = '转写中…';
+  let all = [], ok = 0;
+  for(const f of files){
+    try{
+      const j = await uploadOne(f);
+      if(j.error){ showErr(f.name + ': ' + j.error); continue; }
+      ok++;
+      all.push('## ' + f.name + '\n\n' + j.text);
+      render({name:f.name, text:j.text, lang:j.lang, seconds:j.seconds, time:j.time});
+    }catch(e){ showErr(f.name + ': 请求失败'); }
+  }
+  if(ok > 0) current = {name: files.map(f=>f.name).join(', '), md: all.join('\n\n')};
+  files.length = 0;
+  $('#drop').innerHTML = '把音频文件拖到这里，或 <b>点击选择</b><br><span style="font-size:12px">支持 mp3 / wav / m4a / flac / ogg / amr / 视频音轨，可多选</span>';
+  $('#go').disabled = false; $('#go').textContent = '开始转写';
+}
+
+/* ---------- 录音 ---------- */
+let mediaStream = null, recorder = null, chunks = [], timerId = null, sec = 0, audioCtx = null, rafId = null;
+
+$('#rec').addEventListener('click', () => {
+  if($('#rec').classList.contains('recording')) stopRec(); else startRec();
+});
+
+async function startRec(){
+  try{
+    mediaStream = await navigator.mediaDevices.getUserMedia({audio:true});
+  }catch(e){
+    showErr('无法访问麦克风：' + e.message + '（浏览器地址栏需允许麦克风权限）');
+    return;
+  }
+  chunks = []; sec = 0;
+  recorder = new MediaRecorder(mediaStream);
+  recorder.ondataavailable = e => { if(e.data.size) chunks.push(e.data); };
+  recorder.onstop = onRecStop;
+  recorder.start();
+  $('#rec').classList.add('recording');
+  $('#rec').textContent = '■ 停止录音';
+  $('#rec-time').textContent = '00:00';
+  $('#err').style.display = 'none';
+  timerId = setInterval(() => {
+    sec++;
+    $('#rec-time').textContent = String(Math.floor(sec/60)).padStart(2,'0') + ':' + String(sec%60).padStart(2,'0');
+  }, 1000);
+  meterStart();
+}
+
+function stopRec(){
+  recorder.stop();
+  clearInterval(timerId);
+  meterStop();
+  $('#rec').classList.remove('recording');
+  $('#rec').textContent = '● 开始录音';
+  mediaStream.getTracks().forEach(t => t.stop());
+}
+
+async function onRecStop(){
+  const blob = new Blob(chunks, {type: recorder.mimeType || 'audio/webm'});
+  if(blob.size < 2000){ showErr('录音太短或没有声音'); return; }
+  const ext = (blob.type.includes('ogg')) ? 'ogg' : 'webm';
+  const f = new File([blob], '录音 ' + new Date().toTimeString().slice(0,5).replace(':','') + '.' + ext, {type: blob.type});
+  $('#go').disabled = true; $('#go').textContent = '转写中…';
+  $('#rec').disabled = true;
+  try{
+    const j = await uploadOne(f);
+    if(j.error){ showErr(j.error); }
+    else{
+      current = {name: f.name, md: '## ' + f.name + '\n\n' + j.text};
+      render({name:f.name, text:j.text, lang:j.lang, seconds:j.seconds, time:j.time});
+      loadHistory();
+    }
+  }catch(e){ showErr('请求失败'); }
+  $('#rec').disabled = false;
+  $('#go').disabled = false; $('#go').textContent = '开始转写';
+}
+
+function meterStart(){
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = audioCtx.createMediaStreamSource(mediaStream);
+  const an = audioCtx.createAnalyser();
+  an.fftSize = 512;
+  src.connect(an);
+  const data = new Uint8Array(an.frequencyBinCount);
+  (function tick(){
+    an.getByteFrequencyData(data);
+    let sum = 0; for(const v of data) sum += v*v;
+    const rms = Math.sqrt(sum / data.length);
+    $('#meter-bar').style.width = Math.min(100, rms * 2.2) + '%';
+    rafId = requestAnimationFrame(tick);
+  })();
+}
+
+function meterStop(){
+  cancelAnimationFrame(rafId);
+  if(audioCtx) audioCtx.close();
+  $('#meter-bar').style.width = '0%';
+}
+
+function showErr(msg){
+  $('#err').textContent = msg; $('#err').style.display = 'block';
+}
+
+function render(it){
+  $('#result').style.display = 'block';
+  $('#res-meta').textContent = it.name + ' · ' + (it.lang||'') + ' · 耗时 ' + it.seconds + 's · ' + it.time;
+  $('#text').textContent = it.text;
+  $('#result').scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+/* ---------- 结果操作 ---------- */
+$('#copy').addEventListener('click', async () => {
+  const t = $('#text').textContent;
+  try{ await navigator.clipboard.writeText(t); toast('已复制'); }
+  catch(e){ toast('复制失败，请手动选择文本'); }
+});
+$('#dl').addEventListener('click', () => download(current.name + '.txt', current.md.replace(/^## /gm,'')));
+$('#md').addEventListener('click', () => download(current.name + '.md', current.md));
+function download(name, content){
+  if(!content){ toast('还没有可下载的结果'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], {type:'text/plain;charset=utf-8'}));
+  a.download = name; a.click();
+}
+
+/* ---------- 历史记录 ---------- */
+async function loadHistory(){
+  const r = await fetch('/api/history'); const j = await r.json();
+  const box = $('#hist');
+  if(!j.items.length){ box.innerHTML = '<div class="empty">还没有记录</div>'; return; }
+  box.innerHTML = '';
+  for(const it of j.items){
+    const d = document.createElement('div');
+    d.className = 'hist-item';
+    d.innerHTML = '<div class="hi-meta"><span>' + esc(it.name) + '</span><span>'
+      + esc(it.lang) + '</span><span>' + esc(it.time) + '</span><span>' + it.seconds + 's</span></div>'
+      + '<div class="hi-text">' + esc(it.text) + '</div>';
+    d.addEventListener('click', () => {
+      current = {name: it.name, md: '## ' + it.name + '\n\n' + it.text};
+      render(it);
+    });
+    box.appendChild(d);
+    }
+}
+$('#clear').addEventListener('click', async () => {
+  await fetch('/api/history', {method:'DELETE'});
+  loadHistory(); toast('已清空');
+});
+
+/* ---------- 检查更新（对比 GitHub Release 版本号，提示用户跑 update.bat） ---------- */
+$('#check-upd').addEventListener('click', async e => {
+  e.preventDefault();
+  const msg = $('#upd-msg');
+  msg.textContent = ' 检查中…';
+  try{
+    const r = await fetch('https://api.github.com/repos/' + APP_REPO + '/releases/latest');
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const remote = (j.tag_name || '').replace(/^v/, '');
+    if(!remote) throw new Error('no tag');
+    const cmp = (a, b) => {
+      const A = a.split('.'), B = b.split('.');
+      for(let i = 0; i < 3; i++){
+        const x = parseInt(A[i]||0), y = parseInt(B[i]||0);
+        if(x !== y) return x - y;
+      }
+      return 0;
+    };
+    if(cmp(remote, APP_VER) > 0){
+      msg.innerHTML = ' 有新版本 v' + remote +
+        '，<a href="https://github.com/' + APP_REPO + '/releases" target="_blank">去下载</a>' +
+        '（或运行安装目录的 update.bat）';
+    }else{
+      msg.textContent = ' 已是最新版';
+    }
+  }catch(err){
+    msg.textContent = ' 检查失败（GitHub 访问异常）';
+  }
+});
+
+/* ---------- 杂项 ---------- */
+$('#lang').addEventListener('change', async e => {
+  await fetch('/api/lang', {method:'POST', body:e.target.value});
+});
+$('#go').addEventListener('click', run);
+function esc(s){ return String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+let toastTimer;
+function toast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+}
+health(); loadHistory();
+</script>
+</body>
+</html>
