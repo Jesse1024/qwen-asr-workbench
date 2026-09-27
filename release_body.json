@@ -1,0 +1,7 @@
+{
+  "tag_name": "v1.0.0",
+  "name": "v1.0.0 首个公开版本",
+  "body": "## Qwen3-ASR 语音转写工作台 · 首个公开版本\n\n**作者：南山怪客**\n\n### 功能\n- 页面内录音，停止后自动转写（计时 + 音量指示）\n- 拖拽/多选上传 mp3 / wav / m4a / flac / ogg / amr / 视频音轨\n- 热词提示（人名、术语、代码）、语种锁定（中/英/日/韩/粤）\n- 结果复制 / 下载 .txt / .md，本地历史记录 200 条\n- 页脚检查更新（对比 GitHub Release）\n\n### 安装\n1. 下载下方 `qwen-asr-workbench-v1.0.0.zip` 解压\n2. 双击 `install.bat`（需 Python 3.10+，自动装依赖并下载 4.7GB 模型，ModelScope 国内直连）\n3. 双击桌面「语音转写工作台」图标\n\n有 NVIDIA 显卡（4GB+ 显存）装完后运行一次 `download-model.bat` 可启用 GPU 加速（RTX 4060 实测约 3 倍实时）；无显卡 CPU 也能跑。\n\n### 模型与许可\n- 基于 Qwen3-ASR-1.7B（Apache 2.0），纯本地推理，音频不上传\n- 本项目代码 MIT",
+  "draft": false,
+  "prerelease": false
+}

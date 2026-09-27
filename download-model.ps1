@@ -14,9 +14,17 @@ if ($nvidia) {
   Write-Host "NVIDIA GPU detected: $gpuName"
   Write-Host 'Installing CUDA build of PyTorch (~3 GB download) ...'
   & $venvPy -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu129 --force-reinstall
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host '  pytorch.org failed, retrying CUDA torch from China mirror (tuna) ...'
+    & $venvPy -m pip install torch torchaudio --index-url https://pypi.tuna.tsinghua.edu.cn/simple --force-reinstall
+  }
 } else {
   Write-Host 'No NVIDIA GPU detected, installing CPU build of PyTorch ...'
   & $venvPy -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host '  pytorch.org failed, retrying from China mirror (tuna) ...'
+    & $venvPy -m pip install torch torchaudio --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+  }
 }
 if ($LASTEXITCODE -ne 0) { Write-Host 'torch install failed.'; exit 1 }
 

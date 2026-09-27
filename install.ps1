@@ -53,12 +53,25 @@ if (-not (Test-Path $venvPy)) {
 
 # [3/5] install deps (CPU torch first for bootstrapping; GPU torch via download-model.ps1)
 Write-Host '[3/5] Installing Python dependencies (qwen-asr, modelscope, imageio-ffmpeg) ...'
-$pipArgs = @('-m','pip','install','qwen-asr','modelscope','imageio-ffmpeg')
-& $venvPy @pipArgs
-if ($LASTEXITCODE -ne 0) { Write-Host 'pip install failed.'; exit 1 }
-# torch cpu (small, works everywhere; GPU users upgrade in step 4)
-& $venvPy -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-if ($LASTEXITCODE -ne 0) { Write-Host 'torch install failed.'; exit 1 }
+function Install-Pip($args) {
+  & $venvPy -m pip install @args
+  if ($LASTEXITCODE -eq 0) { return $true }
+  return $false
+}
+$ok = Install-Pip @('qwen-asr','modelscope','imageio-ffmpeg')
+if (-not $ok) {
+  Write-Host '  default PyPI failed, retrying with China mirror (tuna) ...'
+  $ok = Install-Pip @('qwen-asr','modelscope','imageio-ffmpeg','-i','https://pypi.tuna.tsinghua.edu.cn/simple')
+}
+if (-not $ok) { Write-Host 'pip install failed (both default and China mirror).'; exit 1 }
+
+# torch cpu (small, works everywhere; GPU users upgrade via download-model.bat)
+$ok = Install-Pip @('torch','torchaudio','--index-url','https://download.pytorch.org/whl/cpu')
+if (-not $ok) {
+  Write-Host '  pytorch.org failed, retrying from PyPI (bigger download) ...'
+  $ok = Install-Pip @('torch','torchaudio','-i','https://pypi.tuna.tsinghua.edu.cn/simple')
+}
+if (-not $ok) { Write-Host 'torch install failed.'; exit 1 }
 
 # [4/5] download model
 Write-Host '[4/5] Downloading ASR model (~4.7 GB, from ModelScope, China direct) ...'

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="app-version" content="1.0.0">
+<meta name="app-version" content="1.1.0">
 <meta name="app-repo" content="Jesse1024/qwen-asr-workbench">
 <title>Qwen3-ASR 语音转写工作台 · 南山怪客</title>
 <style>
@@ -63,6 +63,18 @@ h1{font-size:20px; font-weight:600}
 .meter{flex:1; max-width:240px; height:8px; background:var(--bg); border:1px solid var(--line); border-radius:4px; overflow:hidden}
 #meter-bar{height:100%; width:0%; background:var(--accent)}
 .rec-hint{font-size:12px; color:var(--muted)}
+.batch-row{display:flex; align-items:center; gap:12px; margin-top:12px}
+#batch{display:none; margin-top:12px}
+.batch-head{display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap}
+#batch-count{font-size:13px; color:var(--fg); margin-right:auto}
+.b-item{display:flex; align-items:center; gap:10px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; margin-top:6px; font-size:13px}
+.b-item input{accent-color:var(--accent)}
+.b-name{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.b-size{color:var(--muted); font-size:12px}
+.b-status{font-size:12px; color:var(--muted); min-width:96px; text-align:right}
+.b-status.done{color:var(--ok)}
+.b-status.err{color:var(--err)}
+.b-status.run{color:var(--accent)}
 #result .meta{font-size:12px; color:var(--muted); margin-bottom:8px}
 #text{
   white-space:pre-wrap; background:var(--bg); border:1px solid var(--line);
@@ -117,6 +129,19 @@ footer a:hover{color:var(--accent)}
       <span style="font-size:12px">支持 mp3 / wav / m4a / flac / ogg / amr / 视频音轨，可多选</span>
     </div>
     <input type="file" id="pick" multiple accept="audio/*,video/*">
+    <div class="batch-row">
+      <button class="btn ghost" id="folder">选择文件夹批量转写</button>
+      <span class="rec-hint">递归扫描子文件夹里的音频，确认清单后批量转写</span>
+    </div>
+    <div id="batch">
+      <div class="batch-head">
+        <span id="batch-count"></span>
+        <button class="btn ghost" id="batch-dl">下载全部 (.md)</button>
+        <button class="btn ghost" id="batch-cancel">取消</button>
+        <button class="btn" id="batch-start">开始批量转写</button>
+      </div>
+      <div id="batch-list"></div>
+    </div>
     <div class="opts">
       <label>热词提示</label>
       <input type="text" id="hotwords" placeholder="人名、术语、股票代码等，空格或逗号分隔，可留空">
@@ -198,9 +223,9 @@ function addFiles(fs){
 }
 
 /* ---------- 转写 ---------- */
-async function uploadOne(f){
+async function uploadOne(f, displayName){
   const fd = new FormData();
-  fd.append('file', f, f.name);
+  fd.append('file', f, displayName || f.name);
   const hw = encodeURIComponent($('#hotwords').value.trim());
   const r = await fetch('/api/transcribe?context=' + hw, {method:'POST', body:fd});
   return r.json();
@@ -355,6 +380,116 @@ async function loadHistory(){
 $('#clear').addEventListener('click', async () => {
   await fetch('/api/history', {method:'DELETE'});
   loadHistory(); toast('已清空');
+});
+
+/* ---------- 文件夹批量转写 ---------- */
+const AUDIO_EXT = /\.(mp3|wav|m4a|flac|ogg|oga|opus|amr|aac|wma|webm|mp4|mkv|mov|avi|flv)$/i;
+let batchFiles = [], batchRunning = false, batchAbort = false, batchMd = '';
+
+$('#folder').addEventListener('click', async () => {
+  if(!window.showDirectoryPicker){ showErr('当前浏览器不支持文件夹选择，请用 Edge 或 Chrome'); return; }
+  let dir;
+  try{ dir = await window.showDirectoryPicker(); }
+  catch(e){ return; } // 用户取消
+  batchFiles = [];
+  await scanDir(dir, '');
+  if(!batchFiles.length){ showErr('这个文件夹里没有找到音频/视频文件'); return; }
+  renderBatch();
+});
+
+async function scanDir(dir, prefix){
+  for await (const entry of dir.values()){
+    if(entry.kind === 'directory'){ await scanDir(entry, prefix + entry.name + '/'); continue; }
+    if(AUDIO_EXT.test(entry.name)) batchFiles.push({entry, path: prefix + entry.name});
+  }
+}
+
+function fmtSize(n){
+  if(n > 1e9) return (n/1e9).toFixed(2) + ' GB';
+  if(n > 1e6) return (n/1e6).toFixed(1) + ' MB';
+  return Math.max(1, Math.round(n/1e3)) + ' KB';
+}
+
+function renderBatch(){
+  const list = $('#batch-list');
+  list.innerHTML = '';
+  batchFiles.forEach((it, i) => {
+    const row = document.createElement('div');
+    row.className = 'b-item';
+    row.innerHTML = '<input type="checkbox" checked data-i="' + i + '">'
+      + '<span class="b-name" title="' + esc(it.path) + '">' + esc(it.path) + '</span>'
+      + '<span class="b-size">' + fmtSize(it.size||0) + '</span>'
+      + '<span class="b-status">待确认</span>';
+    list.appendChild(row);
+  });
+  $('#batch-count').textContent = '找到 ' + batchFiles.length + ' 个文件，取消勾选可跳过';
+  $('#batch').style.display = 'block';
+  $('#batch-start').disabled = false;
+  $('#batch-start').textContent = '开始批量转写';
+  $('#batch-start').style.display = '';
+  $('#batch-cancel').style.display = '';
+  $('#batch-dl').style.display = 'none';
+  $('#batch').scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+$('#batch-cancel').addEventListener('click', () => {
+  if(batchRunning){ batchAbort = true; }
+  else{ $('#batch').style.display = 'none'; }
+});
+
+$('#batch-start').addEventListener('click', async () => {
+  if(batchRunning) return;
+  const checked = [...document.querySelectorAll('#batch-list input:checked')].map(cb => +cb.dataset.i);
+  if(!checked.length){ showErr('没有勾选任何文件'); return; }
+  batchRunning = true; batchAbort = false;
+  $('#err').style.display = 'none';
+  $('#go').disabled = true; $('#rec').disabled = true;
+  $('#batch-start').disabled = true;
+  $('#batch-cancel').textContent = '停止';
+  const rows = [...document.querySelectorAll('#batch-list .b-item')];
+  const results = [];
+  let ok = 0, fail = 0;
+  const t0 = Date.now();
+  for(let n = 0; n < checked.length; n++){
+    if(batchAbort){
+      for(let m = n; m < checked.length; m++){
+        rows[checked[m]].querySelector('.b-status').textContent = '已跳过';
+      }
+      break;
+    }
+    const idx = checked[n];
+    const it = batchFiles[idx];
+    const st = rows[idx].querySelector('.b-status');
+    st.className = 'b-status run'; st.textContent = '转写中 (' + (n+1) + '/' + checked.length + ')';
+    try{
+      const file = await it.entry.getFile();
+      const j = await uploadOne(file, it.path);
+      if(j.error){ throw new Error(j.error); }
+      ok++;
+      st.className = 'b-status done'; st.textContent = '完成 ' + j.seconds + 's';
+      results.push('## ' + it.path + '\n\n' + j.text);
+    }catch(e){
+      fail++;
+      st.className = 'b-status err'; st.textContent = '失败';
+      console.warn(it.path, e);
+    }
+  }
+  batchRunning = false;
+  $('#go').disabled = false; $('#rec').disabled = false;
+  $('#batch-start').disabled = false;
+  $('#batch-cancel').textContent = '取消';
+  $('#batch-count').textContent = '完成：成功 ' + ok + ' · 失败 ' + fail
+    + ' · 总耗时 ' + Math.round((Date.now()-t0)/1000) + 's';
+  if(results.length){
+    batchMd = '# 批量转写结果 ' + new Date().toLocaleString() + '\n\n' + results.join('\n\n');
+    $('#batch-dl').style.display = '';
+  }
+  loadHistory();
+});
+
+$('#batch-dl').addEventListener('click', () => {
+  if(!batchMd){ toast('还没有可下载的结果'); return; }
+  download('批量转写结果.md', batchMd);
 });
 
 /* ---------- 检查更新（对比 GitHub Release 版本号，提示用户跑 update.bat） ---------- */
