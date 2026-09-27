@@ -42,12 +42,12 @@ Write-Host "Current: v$localVer    Latest: v$remoteVer"
 if (-not (IsNewer $remoteVer $localVer)) {
   Write-Host 'Already up to date.'
 } else {
-  $url = "https://cdn.jsdelivr.net/gh/$repo@$($latest.tag_name)/app/index.html"
-  Write-Host "Downloading $url ..."
+  $url = "https://raw.githubusercontent.com/$repo/v$remoteVer/app/index.html"
+  $srv = "https://raw.githubusercontent.com/$repo/v$remoteVer/server.py"
+  Write-Host "Downloading v$remoteVer ..."
   try {
-    Invoke-WebRequest -Uri $url -OutFile $index -UseBasicParsing -TimeoutSec 60
-    $srv = "https://cdn.jsdelivr.net/gh/$repo@$($latest.tag_name)/server.py"
-    Invoke-WebRequest -Uri $srv -OutFile (Join-Path $dir 'server.py') -UseBasicParsing -TimeoutSec 60
+    Invoke-WebRequest -Uri $url -OutFile $index -UseBasicParsing -TimeoutSec 120
+    Invoke-WebRequest -Uri $srv -OutFile (Join-Path $dir 'server.py') -UseBasicParsing -TimeoutSec 120
     Write-Host "Updated to v$remoteVer. Restart the workbench to apply."
   } catch {
     Write-Host "Download failed: $($_.Exception.Message)"
