@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="app-version" content="1.1.0">
+<meta name="app-version" content="1.2.0">
 <meta name="app-repo" content="Jesse1024/qwen-asr-workbench">
 <title>Qwen3-ASR 语音转写工作台 · 南山怪客</title>
 <style>
@@ -107,6 +107,25 @@ footer{
 }
 footer a{color:var(--muted)}
 footer a:hover{color:var(--accent)}
+.tts-status{font-weight:400; font-size:12px; color:var(--muted); margin-left:8px}
+.tts-status .dot{display:inline-block; margin-right:4px}
+.tts-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px}
+@media (max-width:800px){.tts-grid{grid-template-columns:1fr}}
+.field-label{font-size:13px; color:var(--muted); margin-bottom:6px}
+.ref-drop{
+  border:2px dashed var(--line); border-radius:8px; padding:18px; text-align:center;
+  color:var(--muted); cursor:pointer; font-size:13px; transition:.15s;
+}
+.ref-drop.over{border-color:var(--accent); background:var(--accent-weak); color:var(--accent)}
+.ref-drop.has{border-style:solid; color:var(--fg)}
+.tts-grid textarea{
+  width:100%; background:var(--bg); border:1px solid var(--line); border-radius:8px;
+  color:var(--fg); padding:8px 10px; font-size:13px; font-family:inherit;
+  resize:vertical; outline:none;
+}
+.tts-grid textarea:focus{border-color:var(--accent)}
+.tts-actions{display:flex; gap:8px; margin-top:10px}
+.tts-err{color:var(--err); font-size:13px; margin-top:8px; display:none}
 </style>
 </head>
 <body>
@@ -164,6 +183,30 @@ footer a:hover{color:var(--accent)}
         <button class="btn ghost" id="copy">复制全文</button>
         <button class="btn ghost" id="dl">下载 .txt</button>
         <button class="btn ghost" id="md">下载 .md</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>语音克隆 <span class="tts-status" id="tts-status"><span class="dot" id="tts-dot"></span><span id="tts-text">检测中…</span></span></h2>
+    <div class="tts-grid">
+      <div>
+        <div class="field-label">1. 参考音频（3~10 秒，声音清晰无背景音乐）</div>
+        <div id="ref-drop" class="ref-drop">点击选择或拖入参考音频</div>
+        <input type="file" id="ref-pick" accept="audio/*" style="display:none">
+        <div class="field-label" style="margin-top:10px">2. 这段音频里说的内容（提示文本，逐字一致）</div>
+        <textarea id="prompt-text" rows="2" placeholder="把参考音频里说的话一字不差地写在这里"></textarea>
+      </div>
+      <div>
+        <div class="field-label">3. 要让它说的话（合成文本）</div>
+        <textarea id="tts-text-input" rows="4" placeholder="输入任意文字，模型会模仿参考音频的音色读出来"></textarea>
+        <div class="tts-actions">
+          <button class="btn" id="tts-go" disabled>开始合成</button>
+          <button class="btn ghost" id="tts-play" style="display:none">播放</button>
+          <button class="btn ghost" id="tts-dl" style="display:none">下载 .wav</button>
+        </div>
+        <div id="tts-err" class="tts-err"></div>
+        <audio id="tts-audio" controls style="display:none; width:100%; margin-top:8px"></audio>
       </div>
     </div>
   </div>
@@ -490,6 +533,84 @@ $('#batch-start').addEventListener('click', async () => {
 $('#batch-dl').addEventListener('click', () => {
   if(!batchMd){ toast('还没有可下载的结果'); return; }
   download('批量转写结果.md', batchMd);
+});
+
+/* ---------- 语音克隆（TTS） ---------- */
+let refFile = null, ttsAudioUrl = null;
+const refDrop = $('#ref-drop');
+
+$('#tts-text').textContent = '检测中…';
+async function ttsHealth(){
+  try{
+    const r = await fetch('/api/tts_health'); const j = await r.json();
+    if(j.ok){
+      $('#tts-dot').classList.add('on');
+      $('#tts-text').textContent = '克隆服务就绪';
+      $('#tts-go').disabled = false;
+    }else{
+      $('#tts-dot').classList.remove('on');
+      $('#tts-text').textContent = '未启动（先运行 app\\克隆语音服务.bat）';
+      $('#tts-go').disabled = true;
+    }
+  }catch(e){ $('#tts-text').textContent = '状态未知'; }
+  setTimeout(ttsHealth, 6000);
+}
+ttsHealth();
+
+refDrop.addEventListener('click', () => $('#ref-pick').click());
+$('#ref-pick').addEventListener('change', e => { setRef(e.target.files[0]); e.target.value=''; });
+['dragenter','dragover'].forEach(ev => refDrop.addEventListener(ev, e => { e.preventDefault(); refDrop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => refDrop.addEventListener(ev, e => { e.preventDefault(); refDrop.classList.remove('over'); }));
+refDrop.addEventListener('drop', e => { e.preventDefault(); if(e.dataTransfer.files[0]) setRef(e.dataTransfer.files[0]); });
+
+function setRef(f){
+  refFile = f;
+  refDrop.textContent = '已选：' + f.name + '（' + fmtSize(f.size) + '）';
+  refDrop.classList.add('has');
+}
+
+$('#tts-go').addEventListener('click', async () => {
+  const text = $('#tts-text-input').value.trim();
+  const prompt = $('#prompt-text').value.trim();
+  if(!refFile){ showTtsErr('请先选择参考音频'); return; }
+  if(!prompt){ showTtsErr('请填写参考音频里说的内容（提示文本）'); return; }
+  if(!text){ showTtsErr('请填写要合成的文本'); return; }
+  hideTtsErr();
+  $('#tts-go').disabled = true; $('#tts-go').textContent = '合成中…';
+  try{
+    const fd = new FormData();
+    fd.append('ref', refFile, refFile.name);
+    fd.append('text', text);
+    fd.append('prompt_text', prompt);
+    fd.append('text_lang', 'zh');
+    fd.append('prompt_lang', 'zh');
+    const r = await fetch('/api/tts', {method:'POST', body:fd});
+    if(!r.ok){
+      let msg = 'HTTP ' + r.status;
+      try{ msg = (await r.json()).error || msg; }catch(_){}
+      throw new Error(msg);
+    }
+    const blob = await r.blob();
+    if(ttsAudioUrl) URL.revokeObjectURL(ttsAudioUrl);
+    ttsAudioUrl = URL.createObjectURL(blob);
+    const au = $('#tts-audio');
+    au.src = ttsAudioUrl; au.style.display = 'block';
+    $('#tts-play').style.display = ''; $('#tts-dl').style.display = '';
+    toast('合成完成');
+  }catch(e){
+    showTtsErr(e.message || '合成失败');
+  }
+  $('#tts-go').disabled = false; $('#tts-go').textContent = '开始合成';
+});
+
+function showTtsErr(m){ const e = $('#tts-err'); e.textContent = m; e.style.display = 'block'; }
+function hideTtsErr(){ $('#tts-err').style.display = 'none'; }
+$('#tts-play').addEventListener('click', () => { const au = $('#tts-audio'); if(au.src) au.play(); });
+$('#tts-dl').addEventListener('click', () => {
+  if(ttsAudioUrl){
+    const a = document.createElement('a');
+    a.href = ttsAudioUrl; a.download = '克隆语音.wav'; a.click();
+  }
 });
 
 /* ---------- 检查更新（对比 GitHub Release 版本号，提示用户跑 update.bat） ---------- */
